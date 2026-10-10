@@ -377,6 +377,14 @@ export function shadowed(s: { x: number; y: number; z: number }, walls: readonly
   return false;
 }
 
+/**
+ * Whether sunlight that comes in at a window point reaches a floor point: no wall (a free-standing wall, a
+ * partition) stands between them that is higher than the ray there, except at its openings.
+ */
+export function sunReaches(walls: readonly Blocker[], win: { x: number; y: number; z: number }, px: number, pz: number): boolean {
+  return !shadowed(win, walls, px, 0.02, pz);
+}
+
 /** Index of the room a point lies in; outside every room: the outside zone (rooms.length). */
 export function roomIndexAt(floor: Floor, x: number, z: number): number {
   const i = floor.rooms.findIndex((r) => r.points.length >= 3 && pointInPolygon([x, z], r.points));

@@ -61,7 +61,7 @@ import { accentOnUniform, accentUniform, parseAccent, lineBlending, themed, them
 
 export type { Theme } from "./theme.ts";
 import { ALWAYS, DEG, GeoBuffer, LineBuffer, pushPrism } from "./geo.ts";
-import { buildLightSurface, lightColors, roomIndexAt, type LightKind, type LightSource, type LightSurface, zoneOf, zoneRooms } from "./lighting.ts";
+import { buildLightSurface, lightColors, roomIndexAt, type LightKind, type LightSource, type LightSurface, sunReaches, zoneOf, zoneRooms } from "./lighting.ts";
 import { buildOpeningParts, CLOSED, type OpeningState } from "./openings.ts";
 import { circlePath, cleaningPath, stepRobot, type RobotInfo, type RobotMotion } from "./robot.ts";
 
@@ -2285,7 +2285,7 @@ export class FloorplanViewer {
     const north = (this.building?.settings.north ?? 0) * DEG;
     // clouds take most of the sunlight
     const cloud = this.weather?.cloud ?? 0;
-    const sig = sun ? `${sun.elevation.toFixed(1)},${sun.azimuth.toFixed(1)},${north},${cloud.toFixed(2)},${[...fv.openings.values()].map((o) => (o.cover ?? 0).toFixed(2)).join(",")},${fv.lightZones?.join("") ?? ""}` : "";
+    const sig = sun ? `${sun.elevation.toFixed(1)},${sun.azimuth.toFixed(1)},${north},${cloud.toFixed(2)},${[...fv.openings.values()].map((o) => (o.cover ?? 0).toFixed(2)).join(",")},${fv.lightZones?.join("") ?? ""},${fv.lightSurface ? 1 : 0}` : "";
     if (sig === fv.sunSig) return;
     fv.sunSig = sig;
     const buf = new GeoBuffer();
@@ -2320,6 +2320,8 @@ export class FloorplanViewer {
         // crosses walls or leaves the house)
         const rooms = zoneRooms(fv.floor.rooms, fv.lightZones, info.opening.room_id);
         if (!rooms.length) continue;
+        // walls in the way keep the sun off a cell (a free-standing wall, a partition)
+        const blockers = fv.lightSurface?.blockers ?? [];
         const rows = Math.max(1, Math.ceil(Math.min(7, top * reach) / 0.25));
         const cols = Math.max(1, Math.ceil(info.width / 0.3));
         for (let i = 0; i < rows; i++) {
@@ -2334,6 +2336,8 @@ export class FloorplanViewer {
             const s1 = (info.width * (j + 1)) / cols;
             const m = at((s0 + s1) / 2, (y0 + y1) / 2);
             if (!rooms.some((r) => pointInPolygon([m[0], m[2]], r.points))) continue;
+            const dm = Math.min(7, ((y0 + y1) / 2) * reach);
+            if (!sunReaches(blockers, { x: m[0] + toSun[0] * dm, y: (y0 + y1) / 2, z: m[2] + toSun[1] * dm }, m[0], m[2])) continue;
             const a = at(s0, y0);
             const b = at(s1, y0);
             const c = at(s1, y1);

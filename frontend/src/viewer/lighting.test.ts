@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { Floor, Opening, Room } from "../model.ts";
 import { newFloor } from "../model.ts";
 import { buildFloorGeometry } from "./build.ts";
-import { buildLightSurface, lightColors, type LightSource, shadowed, zoneOf, zoneRooms } from "./lighting.ts";
+import { buildLightSurface, lightColors, type LightSource, shadowed, sunReaches, zoneOf, zoneRooms } from "./lighting.ts";
 
 function rect(id: string, x0: number, z0: number, x1: number, z1: number): Room {
   return { id, name: id, area_id: null, points: [[x0, z0], [x1, z0], [x1, z1], [x0, z1]], floor_material: "wood" };
@@ -203,4 +203,15 @@ test("sunlight patch: without zones only the window's own room, unknown room giv
   const rooms = [rect("a", 0, 0, 4, 4), rect("b", 4, 0, 8, 4)];
   assert.deepEqual(zoneRooms(rooms, null, "a").map((r) => r.id), ["a"]);
   assert.deepEqual(zoneRooms(rooms, null, "x"), []);
+});
+
+test("sunlight patch: a free-standing wall between the window and a floor cell keeps the sun off it, a low one does not", () => {
+  const base = { ...newFloor("f", "F", 0), rooms: [rect("a", 0, 0, 8, 4)] };
+  // sunlight comes in at the window point (0, 1.2, 2) and falls towards the floor cell (6, 2)
+  const win = { x: 0, y: 1.2, z: 2 };
+  const reaches = (walls: NonNullable<Floor["walls"]>) => sunReaches(surfaceOf({ ...base, walls }).blockers, win, 6, 2);
+  assert.equal(reaches([]), true, "no wall: the cell is lit");
+  assert.equal(reaches([{ id: "w", a: [3, 0], b: [3, 4] }]), false, "a full-height wall in between: shade");
+  assert.equal(reaches([{ id: "w", a: [3, 0], b: [3, 4], height: 0.3 }]), true, "a low wall: the ray passes over it");
+  assert.equal(reaches([{ id: "w", a: [7, 0], b: [7, 4] }]), true, "a wall behind the cell does not matter");
 });
