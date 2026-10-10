@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { Floor, Opening, Room } from "../model.ts";
 import { newFloor } from "../model.ts";
 import { buildFloorGeometry } from "./build.ts";
-import { buildLightSurface, lightColors, type LightSource, shadowed, zoneOf } from "./lighting.ts";
+import { buildLightSurface, lightColors, type LightSource, shadowed, zoneOf, zoneRooms } from "./lighting.ts";
 
 function rect(id: string, x0: number, z0: number, x1: number, z1: number): Room {
   return { id, name: id, area_id: null, points: [[x0, z0], [x1, z0], [x1, z1], [x0, z1]], floor_material: "wood" };
@@ -189,4 +189,18 @@ test("shadowed: a wall between lamp and point, its height and its openings", () 
   assert.equal(shadowed(s, [{ ...wall, h: 0.5 }], 4, 0, 3), false);
   // past the wall's end
   assert.equal(shadowed({ x: 0, y: 1.5, z: 5 }, [wall], 4, 0, 5), false);
+});
+
+test("sunlight patch: the rooms of a light zone share it, other rooms do not", () => {
+  const rooms = [rect("a", 0, 0, 4, 4), rect("b", 4, 0, 8, 4), rect("c", 8, 0, 12, 4)];
+  // a and b are joined by "no wall" (zone 0), c stands alone (zone 2)
+  assert.deepEqual(zoneRooms(rooms, [0, 0, 2], "a").map((r) => r.id), ["a", "b"]);
+  assert.deepEqual(zoneRooms(rooms, [0, 0, 2], "b").map((r) => r.id), ["b", "a"]);
+  assert.deepEqual(zoneRooms(rooms, [0, 0, 2], "c").map((r) => r.id), ["c"]);
+});
+
+test("sunlight patch: without zones only the window's own room, unknown room gives nothing", () => {
+  const rooms = [rect("a", 0, 0, 4, 4), rect("b", 4, 0, 8, 4)];
+  assert.deepEqual(zoneRooms(rooms, null, "a").map((r) => r.id), ["a"]);
+  assert.deepEqual(zoneRooms(rooms, null, "x"), []);
 });

@@ -5,7 +5,7 @@
 // drywall, the inner corner of an L-shaped room, #300). The surface is built once per floor plan, colours are
 // recomputed when a light changes – a few thousand vertices times a few lamps, well below a millisecond.
 
-import type { Floor, Vec2 } from "../model.ts";
+import type { Floor, Room, Vec2 } from "../model.ts";
 import { outdoorSurface } from "./outdoor.ts";
 import { outdoorDrop, outdoorStanding, pointInPolygon } from "../model.ts";
 import type { Wall } from "../geometry/walls.ts";
@@ -389,4 +389,15 @@ export function roomIndexAt(floor: Floor, x: number, z: number): number {
  */
 export function zoneOf(zones: number[] | null, room: number): number {
   return zones && room >= 0 && room < zones.length ? zones[room] : room;
+}
+
+/**
+ * The rooms that share the light zone of the given room (rooms joined by "no wall"), that room first; just
+ * that room when no zones exist. `zones` holds one zone number per room index, as the viewer builds it.
+ */
+export function zoneRooms(rooms: readonly Room[], zones: readonly number[] | null, roomId: string): Room[] {
+  const at = rooms.findIndex((r) => r.id === roomId);
+  if (at < 0) return [];
+  const same = (i: number) => i === at || (!!zones && zones[i] === zones[at]);
+  return [rooms[at], ...rooms.filter((_, i) => i !== at && same(i))].filter((r) => r.points.length >= 3);
 }

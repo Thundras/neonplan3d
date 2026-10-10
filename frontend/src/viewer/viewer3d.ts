@@ -61,7 +61,7 @@ import { accentOnUniform, accentUniform, parseAccent, lineBlending, themed, them
 
 export type { Theme } from "./theme.ts";
 import { ALWAYS, DEG, GeoBuffer, LineBuffer, pushPrism } from "./geo.ts";
-import { buildLightSurface, lightColors, roomIndexAt, type LightKind, type LightSource, type LightSurface, zoneOf } from "./lighting.ts";
+import { buildLightSurface, lightColors, roomIndexAt, type LightKind, type LightSource, type LightSurface, zoneOf, zoneRooms } from "./lighting.ts";
 import { buildOpeningParts, CLOSED, type OpeningState } from "./openings.ts";
 import { circlePath, cleaningPath, stepRobot, type RobotInfo, type RobotMotion } from "./robot.ts";
 
@@ -2285,7 +2285,7 @@ export class FloorplanViewer {
     const north = (this.building?.settings.north ?? 0) * DEG;
     // clouds take most of the sunlight
     const cloud = this.weather?.cloud ?? 0;
-    const sig = sun ? `${sun.elevation.toFixed(1)},${sun.azimuth.toFixed(1)},${north},${cloud.toFixed(2)},${[...fv.openings.values()].map((o) => (o.cover ?? 0).toFixed(2)).join(",")}` : "";
+    const sig = sun ? `${sun.elevation.toFixed(1)},${sun.azimuth.toFixed(1)},${north},${cloud.toFixed(2)},${[...fv.openings.values()].map((o) => (o.cover ?? 0).toFixed(2)).join(",")},${fv.lightZones?.join("") ?? ""}` : "";
     if (sig === fv.sunSig) return;
     fv.sunSig = sig;
     const buf = new GeoBuffer();
@@ -2315,10 +2315,11 @@ export class FloorplanViewer {
         const k = 0.14 * day * Math.min(1, facing * 1.5);
         const near = new Color(1 * k, 0.82 * k, 0.55 * k);
         const far = near.clone().multiplyScalar(0.45);
-        // the patch stays inside the window's room: it is laid in small cells, and only cells whose
-        // centre lies in the room are drawn (so it never crosses walls or leaves the house)
-        const room = fv.floor.rooms.find((r) => r.id === info.opening.room_id);
-        if (!room || room.points.length < 3) continue;
+        // the patch stays inside the window's room and the rooms open to it (joined by "no wall", the light
+        // zone): it is laid in small cells, and only cells whose centre lies there are drawn (so it never
+        // crosses walls or leaves the house)
+        const rooms = zoneRooms(fv.floor.rooms, fv.lightZones, info.opening.room_id);
+        if (!rooms.length) continue;
         const rows = Math.max(1, Math.ceil(Math.min(7, top * reach) / 0.25));
         const cols = Math.max(1, Math.ceil(info.width / 0.3));
         for (let i = 0; i < rows; i++) {
@@ -2332,7 +2333,7 @@ export class FloorplanViewer {
             const s0 = (info.width * j) / cols;
             const s1 = (info.width * (j + 1)) / cols;
             const m = at((s0 + s1) / 2, (y0 + y1) / 2);
-            if (!pointInPolygon([m[0], m[2]], room.points)) continue;
+            if (!rooms.some((r) => pointInPolygon([m[0], m[2]], r.points))) continue;
             const a = at(s0, y0);
             const b = at(s1, y0);
             const c = at(s1, y1);
