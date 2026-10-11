@@ -94,21 +94,30 @@ export function buildLightSurface(
     const z0 = Math.min(...zs);
     const x1 = Math.max(...xs);
     const z1 = Math.max(...zs);
-    const nx = Math.max(1, Math.ceil((x1 - x0) / cell));
-    const nz = Math.max(1, Math.ceil((z1 - z0) / cell));
-    for (let i = 0; i < nx; i++) {
-      for (let j = 0; j < nz; j++) {
-        const cx = x0 + (i + 0.5) * cell;
-        const cz = z0 + (j + 0.5) * cell;
+    // grid lines every `cell`, plus one at every corner of the outline: an edge that lies off the grid then
+    // runs between two lines, so each piece is wholly in or out and no strip stays dark along the wall
+    const lines = (lo: number, hi: number, corners: number[]) => {
+      const out: number[] = [];
+      for (let k = 0; lo + k * cell < hi - 1e-4; k++) out.push(lo + k * cell);
+      out.push(hi, ...corners.filter((c) => c > lo + 1e-4 && c < hi - 1e-4));
+      out.sort((u, v) => u - v);
+      return out.filter((v, k) => k === 0 || v - out[k - 1] > 1e-3);
+    };
+    const gx = lines(x0, x1, xs);
+    const gz = lines(z0, z1, zs);
+    for (let i = 0; i + 1 < gx.length; i++) {
+      for (let j = 0; j + 1 < gz.length; j++) {
+        const a = gx[i];
+        const b = gz[j];
+        const a1 = gx[i + 1];
+        const b1 = gz[j + 1];
+        // a piece counts when its middle lies in the room; the last row and column end at the room's edge, past it
+        // they would light a strip of the neighbouring room behind the wall (#300) and lie twice in a passage (#290)
+        const cx = (a + a1) / 2;
+        const cz = (b + b1) / 2;
         if (!pointInPolygon([cx, cz], r.points)) continue;
         // no light over a floor opening: one looks through it
         if (holes.some((h) => pointInPolygon([cx, cz], h))) continue;
-        const a = x0 + i * cell;
-        const b = z0 + j * cell;
-        // the last row and column end at the room's edge: past it they would light a strip of the
-        // neighbouring room behind the wall (#300) and lie twice in a passage (#290)
-        const a1 = Math.min(a + cell, x1);
-        const b1 = Math.min(b + cell, z1);
         quad([a, LIFT, b], [a, LIFT, b1], [a1, LIFT, b1], [a1, LIFT, b], [0, 1, 0], ri, -1);
       }
     }

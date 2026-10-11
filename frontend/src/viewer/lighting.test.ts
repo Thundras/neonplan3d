@@ -204,3 +204,29 @@ test("doors on one wall line between several rooms lead into the room they sit i
   assert.deepEqual(rooms("bad"), [0, 1]);
   assert.deepEqual(rooms("schlaf"), [0, 2]);
 });
+
+test("the floor cells of a room reach its edge, also when the edge lies less than half a cell past the grid", () => {
+  // widths whose last grid cell has its centre behind the wall: 3.8 m = 15.2 cells, 4.1 m = 16.4 cells
+  for (const w of [3.8, 4.1, 4.4]) {
+    const s = surfaceOf({ ...newFloor("f", "F", 0), rooms: [rect("a", 0, 0, w, 3)] });
+    let maxX = -Infinity;
+    for (let v = 0; v < s.room.length; v++) if (s.normal[v * 3 + 1] === 1) maxX = Math.max(maxX, s.pos[v * 3]);
+    assert.ok(maxX >= w - 1e-6, `room ${w} m wide: the lit floor ends at ${maxX.toFixed(3)} m, ${((w - maxX) * 100).toFixed(0)} cm short of the wall`);
+    assert.ok(maxX <= w + 1e-6, `and does not pass the wall (${maxX})`);
+  }
+});
+
+test("the floor cells follow a notch in the outline that lies off the grid", () => {
+  // L-shaped room: the inner edge at z = 2.8 m is 0.2 cells past a grid line, so a cell centre test alone leaves up to half a cell dark along it
+  const room: Room = { ...rect("a", 0, 0, 4, 4), points: [[0, 0], [4, 0], [4, 2.8], [2, 2.8], [2, 4], [0, 4]] };
+  const s = surfaceOf({ ...newFloor("f", "F", 0), rooms: [room] });
+  // the floor strip just inside the notch edge must be covered: probe a point 3 cm inside the edge
+  let covered = false;
+  for (let v = 0; v + 5 < s.room.length; v += 6) {
+    if (s.normal[v * 3 + 1] !== 1) continue;
+    const xs = [0, 1, 2, 3, 4, 5].map((k) => s.pos[(v + k) * 3]);
+    const zs = [0, 1, 2, 3, 4, 5].map((k) => s.pos[(v + k) * 3 + 2]);
+    if (Math.min(...xs) <= 3 && Math.max(...xs) >= 3 && Math.min(...zs) <= 2.77 && Math.max(...zs) >= 2.77) covered = true;
+  }
+  assert.ok(covered, "the floor 3 cm inside the notch edge is unlit");
+});
