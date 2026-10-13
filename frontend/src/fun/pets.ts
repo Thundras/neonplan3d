@@ -263,6 +263,8 @@ interface Spot {
   sleep: boolean;
   /** A short visit standing (the bowls), no lying down. */
   visit?: boolean;
+  /** Lies inside its own furniture (a bed or cave), so the furniture is no obstacle on the way there. */
+  home?: boolean;
 }
 
 /** The item's own name: a pack item's id after the pack ("pack:mastershort.pets:cat_bed" → "cat_bed"). */
@@ -302,7 +304,7 @@ function spotsFor(floor: Floor, kind: Pet["kind"], map: FloorMap): Spot[] {
     if (own) {
       // in its bed or cave; by the scratching tree; in front of the dog house
       const p = t === "cat_tree" || t === "dog_house" ? along(f, f.d / 2 + 0.3) : ([f.x, f.z] as Vec2);
-      out.push({ p, y: t === "cat_tree" || t === "dog_house" ? 0 : 0.06, approach: null, face: facing(f), sleep: true });
+      out.push({ p, y: t === "cat_tree" || t === "dog_house" ? 0 : 0.06, approach: null, face: facing(f), sleep: true, home: t !== "cat_tree" && t !== "dog_house" });
     } else if (BOWLS.test(t) && kind !== "rabbit") out.push({ p: along(f, f.d / 2 + 0.25), y: 0, approach: null, face: facing(f) + Math.PI, sleep: false, visit: true });
     else if ((SOFA.test(t) || BED.test(t)) && !t.includes("bunk") && !t.startsWith("dog") && !t.startsWith("cat")) {
       const bed = BED.test(t) || t === "sofa_bed";
@@ -478,6 +480,9 @@ interface Animal {
 }
 
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
+/** How much room a pet keeps to furniture while walking (to turn), and the least it needs (its body). */
+const roomOf = (look: Look) => Math.min(0.26, Math.max(0.14, look.len * 0.45));
+const bodyOf = (look: Look) => look.wid / 2 + 0.01;
 const angleTo = (from: number, to: number) => {
   let d = to - from;
   while (d > Math.PI) d -= 2 * Math.PI;
@@ -540,7 +545,7 @@ export function startPets(ctx: PetsContext): PetsController {
     const zs = r.points.map((p) => p[1]);
     for (let i = 0; i < 12; i++) {
       const p: Vec2 = [rnd(Math.min(...xs) + 0.4, Math.max(...xs) - 0.4), rnd(Math.min(...zs) + 0.4, Math.max(...zs) - 0.4)];
-      if (a.map.roomAt(p) && !a.map.blocked(p) && !a.map.inFurniture(p)) return p;
+      if (a.map.roomAt(p) && !a.map.blocked(p) && !a.map.inFurniture(p, roomOf(a.look))) return p;
     }
     return a.map.freeNear([(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...zs) + Math.max(...zs)) / 2]);
   };
@@ -572,8 +577,8 @@ export function startPets(ctx: PetsContext): PetsController {
       let path: Vec2[] | null = null;
       let entry: Vec2 | null = null;
       for (const c of up ? link.foot : link.top) {
-        if (a.map.blocked(c) || !a.map.roomAt(c)) continue;
-        path = a.map.walk(start, c);
+        if (a.map.blocked(c) || !a.map.roomAt(c) || a.map.inFurniture(c, roomOf(a.look))) continue;
+        path = a.map.walk(start, c, roomOf(a.look), bodyOf(a.look));
         if (path) {
           entry = c;
           break;
@@ -594,8 +599,10 @@ export function startPets(ctx: PetsContext): PetsController {
       const fav = choices.length && (night || Math.random() < 0.6) ? choices[Math.floor(Math.random() * choices.length)] : null;
       if (fav && fav === a.on) continue;
       const goal = fav ? (fav.approach ?? fav.p) : somewhere(a);
+      // a place that lies in other furniture (between a couch and its table) is none: the way there would lead through it
+      if (fav && !fav.home && a.map.inFurniture(goal, roomOf(a.look))) continue;
       const target = a.map.blocked(goal) ? a.map.freeNear(goal) : goal;
-      const path = Math.hypot(target[0] - start[0], target[1] - start[1]) < 0.05 ? [] : a.map.walk(start, target);
+      const path = Math.hypot(target[0] - start[0], target[1] - start[1]) < 0.05 ? [] : a.map.walk(start, target, roomOf(a.look), bodyOf(a.look));
       if (!path) continue;
       a.path = path;
       a.goal = fav;

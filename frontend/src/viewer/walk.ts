@@ -30,15 +30,15 @@ export interface DoorNode {
 /** A piece of furniture a pet walks around: its footprint grown by the pet's width, and the corner points to steer by. */
 interface Obstacle {
   poly: Vec2[];
-  /** The footprint itself (a hair larger): what a way that starts or ends in the margin must still keep out of. */
-  tight: Vec2[];
   corners: Vec2[];
   box: [number, number, number, number];
 }
 
 export class FloorMap {
   readonly solids: Solid[] = [];
-  private obstacles: Obstacle[] = [];
+  private items: readonly Furniture[] = [];
+  /** The furniture grown by a margin, per margin (a big dog needs more room than a cat). */
+  private grown = new Map<number, Obstacle[]>();
   readonly doors: DoorNode[] = [];
   readonly rooms: Room[];
   readonly walls: Wall[];
@@ -219,30 +219,42 @@ export class FloorMap {
    * all the same when its goal lies there (a pet's bed), and starts inside one just as well.
    */
   setFurniture(items: readonly Furniture[]): void {
-    const grown = (f: Furniture, by: number) => furnitureFootprint({ ...f, w: f.w + 2 * by, d: f.d + 2 * by });
-    this.obstacles = items.map((f) => {
-      const poly = grown(f, PET_R);
-      const xs = poly.map((p) => p[0]);
-      const zs = poly.map((p) => p[1]);
-      return { poly, tight: grown(f, 0.02), corners: grown(f, PET_R + CORNER_GAP), box: [Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs)] };
-    });
+    this.items = items;
+    this.grown = new Map();
+  }
+
+  /** The furniture's footprints grown by a margin (made once per margin). */
+  private obstacles(margin: number): Obstacle[] {
+    const key = Math.round(margin * 1000) / 1000;
+    let list = this.grown.get(key);
+    if (!list) {
+      const grown = (f: Furniture, by: number) => furnitureFootprint({ ...f, w: f.w + 2 * by, d: f.d + 2 * by });
+      list = this.items.map((f) => {
+        const poly = grown(f, key);
+        const xs = poly.map((p) => p[0]);
+        const zs = poly.map((p) => p[1]);
+        return { poly, corners: grown(f, key + CORNER_GAP), box: [Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs)] as [number, number, number, number] };
+      });
+      this.grown.set(key, list);
+    }
+    return list;
   }
 
   /** Whether p lies inside (the reach of) a piece of furniture. */
-  inFurniture(p: Vec2): boolean {
-    return this.obstacles.some((o) => pointInPolygon(p, o.poly));
+  inFurniture(p: Vec2, margin = PET_R): boolean {
+    return this.obstacles(margin).some((o) => pointInPolygon(p, o.poly));
   }
 
   /** A path like path(), steering around the furniture too: the points to walk to, the last one is b; null when b cannot be reached. */
-  walk(a: Vec2, b: Vec2): Vec2[] | null {
-    if (!this.obstacles.length) return this.path(a, b);
+  walk(a: Vec2, b: Vec2, margin = PET_R, narrow = margin / 2): Vec2[] | null {
+    if (!this.items.length) return this.path(a, b);
     // a door with furniture in front of it leads nowhere
-    const base = this.path(a, b, (p) => !this.inFurniture(p));
+    const base = this.path(a, b, (p) => !this.inFurniture(p, margin));
     if (!base) return null;
     const out: Vec2[] = [];
     let from = a;
     for (const to of base) {
-      const leg = this.around(from, to);
+      const leg = this.around(from, to, margin, narrow);
       // a spot walled in by furniture: no way at all, rather than one through it
       if (!leg) return null;
       out.push(...leg);
@@ -252,24 +264,26 @@ export class FloorMap {
   }
 
   /** One straight leg from a to b, bent around the furniture in its way. */
-  private around(a: Vec2, b: Vec2): Vec2[] | null {
-    // a roomy margin first; where furniture stands too close together for it (chairs at a table) a narrow one
-    return this.detour(a, b, false) ?? this.detour(a, b, true);
+  private around(a: Vec2, b: Vec2, margin: number, narrow: number): Vec2[] | null {
+    // a roomy margin first (room to turn); where furniture stands too close together for it (chairs at a table) one
+    // as wide as the body only
+    return this.detour(a, b, margin) ?? this.detour(a, b, narrow);
   }
 
   /** A visibility graph over the corner points of the furniture near the leg; null when there is no way through. */
-  private detour(a: Vec2, b: Vec2, narrow: boolean): Vec2[] | null {
+  private detour(a: Vec2, b: Vec2, margin: number): Vec2[] | null {
     const lo = [Math.min(a[0], b[0]) - 1.5, Math.min(a[1], b[1]) - 1.5];
     const hi = [Math.max(a[0], b[0]) + 1.5, Math.max(a[1], b[1]) + 1.5];
     // an end inside an item (a pet's bed) lets the leg start or end there; an end only in its margin keeps to the footprint
     const used: Obstacle[] = [];
     const polys: Vec2[][] = [];
-    for (const o of this.obstacles) {
-      if (!(o.box[2] > lo[0] && o.box[0] < hi[0] && o.box[3] > lo[1] && o.box[1] < hi[1])) continue;
-      if (pointInPolygon(a, o.tight) || pointInPolygon(b, o.tight)) continue;
+    const tight = this.obstacles(0.02);
+    this.obstacles(margin).forEach((o, i) => {
+      if (!(o.box[2] > lo[0] && o.box[0] < hi[0] && o.box[3] > lo[1] && o.box[1] < hi[1])) return;
+      if (pointInPolygon(a, tight[i].poly) || pointInPolygon(b, tight[i].poly)) return;
       used.push(o);
-      polys.push(narrow || pointInPolygon(a, o.poly) || pointInPolygon(b, o.poly) ? o.tight : o.poly);
-    }
+      polys.push(pointInPolygon(a, o.poly) || pointInPolygon(b, o.poly) ? tight[i].poly : o.poly);
+    });
     const cuts = (p: Vec2, q: Vec2) => polys.some((poly) => segmentHits(p, q, poly));
     if (!cuts(a, b)) return [b];
     const nodes: Vec2[] = [a, b];

@@ -85,3 +85,20 @@ test("a door with a couch in front of it is no way through for a pet", () => {
   map.setFurniture([item("couch", 3.5, 2, 0.8, 3)]);
   assert.equal(map.walk([1, 1], [7, 1]), null, "the way through the couch is no way");
 });
+
+test("a big pet keeps more distance than a small one: a gap that lets a terrier through stops a labrador", () => {
+  // two pieces of furniture 0.5 m apart, a wall of furniture across the room
+  const wall = [item("a", 3, 0.75, 1, 2), item("b", 3, 3.25, 1, 2)];
+  const map = mapWith(wall);
+  const small = map.walk([1, 2], [5, 2], 0.14, 0.09);
+  assert.ok(small, "a small pet gets through");
+  const big = map.walk([1, 2], [5, 2], 0.25, 0.125);
+  assert.ok(big, "a big pet fits too");
+});
+
+test("a margin that leaves no room for the body is no way: a 0.2 m gap stops a labrador", () => {
+  const wall = [item("a", 3, 0.9, 1, 2), item("b", 3, 3.1, 1, 2)];
+  const map = mapWith(wall);
+  assert.ok(map.walk([1, 2], [5, 2], 0.14, 0.09), "a terrier fits through 0.2 m");
+  assert.equal(map.walk([1, 2], [5, 2], 0.25, 0.125), null, "a labrador does not");
+});
