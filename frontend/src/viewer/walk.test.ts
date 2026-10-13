@@ -55,10 +55,10 @@ test("a goal inside a piece of furniture (a pet's bed) can be reached", () => {
   assert.deepEqual(way![way!.length - 1], [3, 2]);
 });
 
-test("a row of furniture is walked around, even along a wall", () => {
-  const row = [item("a", 1.5, 2, 2, 0.8), item("b", 3.4, 2, 1.6, 0.8), item("c", 5.0, 2, 1.2, 0.8)];
+test("a row of furniture is walked around", () => {
+  const row = [item("a", 1.8, 2, 1.6, 0.8), item("b", 3.4, 2, 1.4, 0.8), item("c", 4.7, 2, 1, 0.8)];
   const map = mapWith(row);
-  const a: Vec2 = [0.2, 2];
+  const a: Vec2 = [0.5, 2];
   const way = map.walk(a, [5.8, 2]);
   assert.ok(way);
   for (const f of row) assert.ok(!hits([a, ...way!], f), `cuts through ${f.id}`);
@@ -101,4 +101,11 @@ test("a margin that leaves no room for the body is no way: a 0.2 m gap stops a l
   const map = mapWith(wall);
   assert.ok(map.walk([1, 2], [5, 2], 0.14, 0.09), "a terrier fits through 0.2 m");
   assert.equal(map.walk([1, 2], [5, 2], 0.25, 0.125), null, "a labrador does not");
+});
+
+test("a pet does not slip through the narrow strip between a couch and the wall behind it", () => {
+  // the couch's back leaves 0.375 m to the outer wall: room for a terrier, but it would vanish behind the couch;
+  // in front of it a long unit leaves no way (0.175 m)
+  const map = mapWith([item("unit", 3, 1.25, 3.4, 2.3), item("couch", 3, 3.1, 3.4, 1.05)]);
+  assert.equal(map.walk([0.5, 3.3], [5.5, 3.3], 0.14, 0.09), null);
 });

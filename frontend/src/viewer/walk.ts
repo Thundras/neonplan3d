@@ -9,6 +9,11 @@ const RADIUS = 0.2;
 /** How close a pet passes furniture (its body half-width) and the extra gap of the corner points it steers by. */
 const PET_R = 0.16;
 const CORNER_GAP = 0.04;
+/**
+ * How far a pet keeps from a wall while it steers around furniture: a strip between a couch and the wall behind
+ * it is closed (the pet would vanish behind the couch and come out on the other side).
+ */
+const WALL_GAP = 0.3;
 
 interface Solid {
   a: Vec2;
@@ -101,13 +106,17 @@ export class FloorMap {
     return false;
   }
 
-  /** Whether a straight walk from a to b stays clear of walls. */
-  clear(a: Vec2, b: Vec2): boolean {
+  /**
+   * Whether a straight walk from a to b stays clear of walls. A bigger `r` keeps more distance, except right at the
+   * ends (a pet sitting close to a wall must be able to leave, one may stop close to it).
+   */
+  clear(a: Vec2, b: Vec2, r = RADIUS): boolean {
     const d = Math.hypot(b[0] - a[0], b[1] - a[1]);
     const n = Math.max(1, Math.ceil(d / 0.08));
     for (let i = 1; i <= n; i++) {
       const t = i / n;
-      if (this.blocked([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t])) return false;
+      const near = r > RADIUS && (t * d < 0.4 || (1 - t) * d < 0.4);
+      if (this.blocked([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t], near ? RADIUS : r)) return false;
     }
     return true;
   }
@@ -246,7 +255,7 @@ export class FloorMap {
   }
 
   /** A path like path(), steering around the furniture too: the points to walk to, the last one is b; null when b cannot be reached. */
-  walk(a: Vec2, b: Vec2, margin = PET_R, narrow = margin / 2): Vec2[] | null {
+  walk(a: Vec2, b: Vec2, margin = PET_R, narrow = margin / 2, wall = WALL_GAP): Vec2[] | null {
     if (!this.items.length) return this.path(a, b);
     // a door with furniture in front of it leads nowhere
     const base = this.path(a, b, (p) => !this.inFurniture(p, margin));
@@ -254,7 +263,7 @@ export class FloorMap {
     const out: Vec2[] = [];
     let from = a;
     for (const to of base) {
-      const leg = this.around(from, to, margin, narrow);
+      const leg = this.around(from, to, margin, narrow, wall);
       // a spot walled in by furniture: no way at all, rather than one through it
       if (!leg) return null;
       out.push(...leg);
@@ -264,14 +273,14 @@ export class FloorMap {
   }
 
   /** One straight leg from a to b, bent around the furniture in its way. */
-  private around(a: Vec2, b: Vec2, margin: number, narrow: number): Vec2[] | null {
+  private around(a: Vec2, b: Vec2, margin: number, narrow: number, wall: number): Vec2[] | null {
     // a roomy margin first (room to turn); where furniture stands too close together for it (chairs at a table) one
     // as wide as the body only
-    return this.detour(a, b, margin) ?? this.detour(a, b, narrow);
+    return this.detour(a, b, margin, wall) ?? this.detour(a, b, narrow, wall);
   }
 
   /** A visibility graph over the corner points of the furniture near the leg; null when there is no way through. */
-  private detour(a: Vec2, b: Vec2, margin: number): Vec2[] | null {
+  private detour(a: Vec2, b: Vec2, margin: number, wall: number): Vec2[] | null {
     const lo = [Math.min(a[0], b[0]) - 1.5, Math.min(a[1], b[1]) - 1.5];
     const hi = [Math.max(a[0], b[0]) + 1.5, Math.max(a[1], b[1]) + 1.5];
     // an end inside an item (a pet's bed) lets the leg start or end there; an end only in its margin keeps to the footprint
@@ -289,7 +298,7 @@ export class FloorMap {
     const nodes: Vec2[] = [a, b];
     for (const o of used) {
       for (const c of o.corners) {
-        if (polys.some((poly) => pointInPolygon(c, poly)) || this.blocked(c, 0.05) || !this.roomAt(c)) continue;
+        if (polys.some((poly) => pointInPolygon(c, poly)) || this.blocked(c, wall) || !this.roomAt(c)) continue;
         nodes.push(c);
       }
     }
@@ -307,7 +316,7 @@ export class FloorMap {
       for (let v = 0; v < n; v++) {
         if (done[v] || v === u) continue;
         const d = dist[u] + Math.hypot(nodes[u][0] - nodes[v][0], nodes[u][1] - nodes[v][1]);
-        if (d >= dist[v] || cuts(nodes[u], nodes[v]) || !this.clear(nodes[u], nodes[v])) continue;
+        if (d >= dist[v] || cuts(nodes[u], nodes[v]) || !this.clear(nodes[u], nodes[v], wall)) continue;
         dist[v] = d;
         prev[v] = u;
       }
