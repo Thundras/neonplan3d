@@ -116,10 +116,13 @@ export class FloorMap {
     return this.rooms.find((r) => pointInPolygon(p, r.points)) ?? null;
   }
 
-  /** A path from a to b through doors (Dijkstra over the door points), or null when b cannot be reached. */
-  path(a: Vec2, b: Vec2): Vec2[] | null {
+  /**
+   * A path from a to b through doors (Dijkstra over the door points), or null when b cannot be reached.
+   * `usable` rules door points out (the pets: one that lies in a couch's place).
+   */
+  path(a: Vec2, b: Vec2, usable?: (p: Vec2) => boolean): Vec2[] | null {
     if (this.clear(a, b)) return [b];
-    const nodes: Vec2[] = [a, b, ...this.doors.flatMap((d) => d.p).filter((p) => !this.blocked(p))];
+    const nodes: Vec2[] = [a, b, ...this.doors.flatMap((d) => d.p).filter((p) => !this.blocked(p) && (!usable || usable(p)))];
     const n = nodes.length;
     const dist = new Array<number>(n).fill(Infinity);
     const prev = new Array<number>(n).fill(-1);
@@ -230,23 +233,28 @@ export class FloorMap {
     return this.obstacles.some((o) => pointInPolygon(p, o.poly));
   }
 
-  /** A path like path(), steering around the furniture too: the points to walk to, the last one is b. */
+  /** A path like path(), steering around the furniture too: the points to walk to, the last one is b; null when b cannot be reached. */
   walk(a: Vec2, b: Vec2): Vec2[] | null {
-    const base = this.path(a, b);
-    if (!base || !this.obstacles.length) return base;
+    if (!this.obstacles.length) return this.path(a, b);
+    // a door with furniture in front of it leads nowhere
+    const base = this.path(a, b, (p) => !this.inFurniture(p));
+    if (!base) return null;
     const out: Vec2[] = [];
     let from = a;
     for (const to of base) {
-      out.push(...this.around(from, to));
+      const leg = this.around(from, to);
+      // a spot walled in by furniture: no way at all, rather than one through it
+      if (!leg) return null;
+      out.push(...leg);
       from = to;
     }
     return out;
   }
 
   /** One straight leg from a to b, bent around the furniture in its way. */
-  private around(a: Vec2, b: Vec2): Vec2[] {
+  private around(a: Vec2, b: Vec2): Vec2[] | null {
     // a roomy margin first; where furniture stands too close together for it (chairs at a table) a narrow one
-    return this.detour(a, b, false) ?? this.detour(a, b, true) ?? [b];
+    return this.detour(a, b, false) ?? this.detour(a, b, true);
   }
 
   /** A visibility graph over the corner points of the furniture near the leg; null when there is no way through. */

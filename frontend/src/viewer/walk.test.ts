@@ -63,3 +63,25 @@ test("a row of furniture is walked around, even along a wall", () => {
   assert.ok(way);
   for (const f of row) assert.ok(!hits([a, ...way!], f), `cuts through ${f.id}`);
 });
+
+test("a spot walled in by furniture cannot be reached: no way instead of one through the furniture", () => {
+  // a corner boxed in by a couch in an L (the gap between the items is narrower than a pet)
+  const couch = [item("a", 1.5, 1.1, 3, 0.6), item("b", 2.85, 0.5, 0.6, 1.8)];
+  const map = mapWith(couch);
+  assert.equal(map.walk([4.5, 3], [0.5, 0.5]), null);
+  // the same corner can be left (a pet that sits there) – only the way in is refused
+  assert.ok(map.walk([4.5, 3], [4.5, 0.5]));
+});
+
+test("a door with a couch in front of it is no way through for a pet", () => {
+  const next: Room = { ...room, id: "b", name: "b", points: [[4, 0], [8, 0], [8, 4], [4, 4]] };
+  const left: Room = { ...room, points: [[0, 0], [4, 0], [4, 4], [0, 4]] };
+  const b = emptyBuilding();
+  const door = { id: "d", room_id: "a", edge: 1, offset: 1.5, width: 0.9, type: "door", sill: 0, height: 2.05, hinge: "left", leaves: 1, swing: "in", cover: null, contact: null, contact2: null, tilt: null } as const;
+  const floor = { ...newFloor("f", "F", 0), rooms: [left, next], openings: [door] };
+  b.floors = [floor];
+  const map = new FloorMap(b, floor);
+  assert.ok(map.path([1, 1], [7, 1]), "the door leads through");
+  map.setFurniture([item("couch", 3.5, 2, 0.8, 3)]);
+  assert.equal(map.walk([1, 1], [7, 1]), null, "the way through the couch is no way");
+});
