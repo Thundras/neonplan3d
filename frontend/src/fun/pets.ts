@@ -7,6 +7,7 @@
 
 import type * as THREE from "three";
 import type { Building, Floor, Furniture, Pet, Vec2 } from "../model.ts";
+import { mountBase } from "../packs.ts";
 import type { FloorMap } from "../viewer/walk.ts";
 
 /** The three.js classes the pets need, lent by the 3D bundle (it has no ready-made spheres or boxes: shapes are made here). */
@@ -505,7 +506,10 @@ export function startPets(ctx: PetsContext): PetsController {
       // shut doors are walls for the pets
       const shut = ctx.closedDoors?.() ?? new Set<string>();
       const walkable = shut.size ? { ...floor, openings: floor.openings.filter((o) => !shut.has(o.id)) } : floor;
-      info = { floor, map: new ctx.FloorMap(plan, walkable), rooms: floor.rooms.filter((r) => r.points.length >= 3), spots: new Map() };
+      const map = new ctx.FloorMap(plan, walkable);
+      // the pets walk around everything that stands on the floor (not over rugs, nor below wall units and ceiling lamps)
+      map.setFurniture(floor.furniture.filter((f) => f.h >= 0.1 && mountBase(floor, f) < 0.15));
+      info = { floor, map, rooms: floor.rooms.filter((r) => r.points.length >= 3), spots: new Map() };
       floors.set(id, info);
     }
     return info;
@@ -535,7 +539,7 @@ export function startPets(ctx: PetsContext): PetsController {
     const zs = r.points.map((p) => p[1]);
     for (let i = 0; i < 12; i++) {
       const p: Vec2 = [rnd(Math.min(...xs) + 0.4, Math.max(...xs) - 0.4), rnd(Math.min(...zs) + 0.4, Math.max(...zs) - 0.4)];
-      if (a.map.roomAt(p) && !a.map.blocked(p)) return p;
+      if (a.map.roomAt(p) && !a.map.blocked(p) && !a.map.inFurniture(p)) return p;
     }
     return a.map.freeNear([(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...zs) + Math.max(...zs)) / 2]);
   };
@@ -568,7 +572,7 @@ export function startPets(ctx: PetsContext): PetsController {
       let entry: Vec2 | null = null;
       for (const c of up ? link.foot : link.top) {
         if (a.map.blocked(c) || !a.map.roomAt(c)) continue;
-        path = a.map.path(start, c);
+        path = a.map.walk(start, c);
         if (path) {
           entry = c;
           break;
@@ -590,7 +594,7 @@ export function startPets(ctx: PetsContext): PetsController {
       if (fav && fav === a.on) continue;
       const goal = fav ? (fav.approach ?? fav.p) : somewhere(a);
       const target = a.map.blocked(goal) ? a.map.freeNear(goal) : goal;
-      const path = Math.hypot(target[0] - start[0], target[1] - start[1]) < 0.05 ? [] : a.map.path(start, target);
+      const path = Math.hypot(target[0] - start[0], target[1] - start[1]) < 0.05 ? [] : a.map.walk(start, target);
       if (!path) continue;
       a.path = path;
       a.goal = fav;

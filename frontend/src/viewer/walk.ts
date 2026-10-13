@@ -2,10 +2,13 @@
 // floor walks there (around walls, through doors), dragging looks around, keys and a stick move.
 // The geometry part (walls, doors, paths) is plain maths; WalkCamera drives NeonPlan's 3D view.
 import { generateWalls, locateOpening, openingHost, type Wall } from "../geometry/walls.ts";
-import { centroid, pointInPolygon, type Building, type Floor, type Room, type Vec2 } from "../model.ts";
+import { centroid, furnitureFootprint, pointInPolygon, type Building, type Floor, type Furniture, type Room, type Vec2 } from "../model.ts";
 
 export const EYE = 1.62;
 const RADIUS = 0.2;
+/** How close a pet passes furniture (its body half-width) and the extra gap of the corner points it steers by. */
+const PET_R = 0.16;
+const CORNER_GAP = 0.04;
 
 interface Solid {
   a: Vec2;
@@ -24,8 +27,18 @@ export interface DoorNode {
   centre: Vec2;
 }
 
+/** A piece of furniture a pet walks around: its footprint grown by the pet's width, and the corner points to steer by. */
+interface Obstacle {
+  poly: Vec2[];
+  /** The footprint itself (a hair larger): what a way that starts or ends in the margin must still keep out of. */
+  tight: Vec2[];
+  corners: Vec2[];
+  box: [number, number, number, number];
+}
+
 export class FloorMap {
   readonly solids: Solid[] = [];
+  private obstacles: Obstacle[] = [];
   readonly doors: DoorNode[] = [];
   readonly rooms: Room[];
   readonly walls: Wall[];
@@ -198,6 +211,90 @@ export class FloorMap {
     return best;
   }
 
+  /**
+   * Furniture the pets walk around (the walk through the house ignores it: walls only). A way ends inside an item
+   * all the same when its goal lies there (a pet's bed), and starts inside one just as well.
+   */
+  setFurniture(items: readonly Furniture[]): void {
+    const grown = (f: Furniture, by: number) => furnitureFootprint({ ...f, w: f.w + 2 * by, d: f.d + 2 * by });
+    this.obstacles = items.map((f) => {
+      const poly = grown(f, PET_R);
+      const xs = poly.map((p) => p[0]);
+      const zs = poly.map((p) => p[1]);
+      return { poly, tight: grown(f, 0.02), corners: grown(f, PET_R + CORNER_GAP), box: [Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs)] };
+    });
+  }
+
+  /** Whether p lies inside (the reach of) a piece of furniture. */
+  inFurniture(p: Vec2): boolean {
+    return this.obstacles.some((o) => pointInPolygon(p, o.poly));
+  }
+
+  /** A path like path(), steering around the furniture too: the points to walk to, the last one is b. */
+  walk(a: Vec2, b: Vec2): Vec2[] | null {
+    const base = this.path(a, b);
+    if (!base || !this.obstacles.length) return base;
+    const out: Vec2[] = [];
+    let from = a;
+    for (const to of base) {
+      out.push(...this.around(from, to));
+      from = to;
+    }
+    return out;
+  }
+
+  /** One straight leg from a to b, bent around the furniture in its way. */
+  private around(a: Vec2, b: Vec2): Vec2[] {
+    // a roomy margin first; where furniture stands too close together for it (chairs at a table) a narrow one
+    return this.detour(a, b, false) ?? this.detour(a, b, true) ?? [b];
+  }
+
+  /** A visibility graph over the corner points of the furniture near the leg; null when there is no way through. */
+  private detour(a: Vec2, b: Vec2, narrow: boolean): Vec2[] | null {
+    const lo = [Math.min(a[0], b[0]) - 1.5, Math.min(a[1], b[1]) - 1.5];
+    const hi = [Math.max(a[0], b[0]) + 1.5, Math.max(a[1], b[1]) + 1.5];
+    // an end inside an item (a pet's bed) lets the leg start or end there; an end only in its margin keeps to the footprint
+    const used: Obstacle[] = [];
+    const polys: Vec2[][] = [];
+    for (const o of this.obstacles) {
+      if (!(o.box[2] > lo[0] && o.box[0] < hi[0] && o.box[3] > lo[1] && o.box[1] < hi[1])) continue;
+      if (pointInPolygon(a, o.tight) || pointInPolygon(b, o.tight)) continue;
+      used.push(o);
+      polys.push(narrow || pointInPolygon(a, o.poly) || pointInPolygon(b, o.poly) ? o.tight : o.poly);
+    }
+    const cuts = (p: Vec2, q: Vec2) => polys.some((poly) => segmentHits(p, q, poly));
+    if (!cuts(a, b)) return [b];
+    const nodes: Vec2[] = [a, b];
+    for (const o of used) {
+      for (const c of o.corners) {
+        if (polys.some((poly) => pointInPolygon(c, poly)) || this.blocked(c, 0.05) || !this.roomAt(c)) continue;
+        nodes.push(c);
+      }
+    }
+    const n = nodes.length;
+    const dist = new Array<number>(n).fill(Infinity);
+    const prev = new Array<number>(n).fill(-1);
+    const done = new Array<boolean>(n).fill(false);
+    dist[0] = 0;
+    for (;;) {
+      let u = -1;
+      for (let i = 0; i < n; i++) if (!done[i] && dist[i] < Infinity && (u < 0 || dist[i] < dist[u])) u = i;
+      if (u < 0) return null;
+      if (u === 1) break;
+      done[u] = true;
+      for (let v = 0; v < n; v++) {
+        if (done[v] || v === u) continue;
+        const d = dist[u] + Math.hypot(nodes[u][0] - nodes[v][0], nodes[u][1] - nodes[v][1]);
+        if (d >= dist[v] || cuts(nodes[u], nodes[v]) || !this.clear(nodes[u], nodes[v])) continue;
+        dist[v] = d;
+        prev[v] = u;
+      }
+    }
+    const way: Vec2[] = [];
+    for (let i = 1; i > 0; i = prev[i]) way.unshift(nodes[i]);
+    return way;
+  }
+
   /** A free spot near p (the middle of a room may hold a table – walls only matter here). */
   freeNear(p: Vec2): Vec2 {
     if (!this.blocked(p)) return p;
@@ -207,6 +304,24 @@ export class FloorMap {
     }
     return p;
   }
+}
+
+/** Whether the segment p-q passes through the inside of a convex polygon (touching its outline does not count). */
+function segmentHits(p: Vec2, q: Vec2, poly: readonly Vec2[]): boolean {
+  if (pointInPolygon(p, poly) || pointInPolygon(q, poly)) return true;
+  const mid: Vec2 = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+  if (pointInPolygon(mid, poly)) return true;
+  const cross = (o: Vec2, u: Vec2, v: Vec2) => (u[0] - o[0]) * (v[1] - o[1]) - (u[1] - o[1]) * (v[0] - o[0]);
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const c = poly[j];
+    const d = poly[i];
+    const d1 = cross(p, q, c);
+    const d2 = cross(p, q, d);
+    const d3 = cross(c, d, p);
+    const d4 = cross(c, d, q);
+    if (d1 * d2 < -1e-12 && d3 * d4 < -1e-12) return true;
+  }
+  return false;
 }
 
 function area(r: Room): number {
