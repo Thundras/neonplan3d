@@ -507,8 +507,9 @@ export function startPets(ctx: PetsContext): PetsController {
       const shut = ctx.closedDoors?.() ?? new Set<string>();
       const walkable = shut.size ? { ...floor, openings: floor.openings.filter((o) => !shut.has(o.id)) } : floor;
       const map = new ctx.FloorMap(plan, walkable);
-      // the pets walk around everything that stands on the floor (not over rugs, nor below wall units and ceiling lamps)
-      map.setFurniture(floor.furniture.filter((f) => f.h >= 0.1 && mountBase(floor, f) < 0.15));
+      // the pets walk around everything that reaches down towards the floor, also a shelf lifted a little (heights do not
+      // matter), but not over rugs, nor below wall units, ceiling lamps and what stands on a table
+      map.setFurniture(floor.furniture.filter((f) => f.h >= 0.1 && mountBase(floor, f) < 0.5));
       info = { floor, map, rooms: floor.rooms.filter((r) => r.points.length >= 3), spots: new Map() };
       floors.set(id, info);
     }
